@@ -36,15 +36,36 @@ def load_api_key():
     return KEY_FILE.read_text().strip()
 
 
-def rewrite(text, cfg):
+# Modo --json (lo usa tetsuHelper): además del texto limpio, una traducción
+# al inglés para modelos que rinden mejor en inglés. Misma llamada a Gemini.
+JSON_ADDENDUM = """
+
+## Modo JSON
+En lugar de sólo el texto, devolvé un objeto JSON con dos campos:
+- "clean": el texto limpio, exactamente como lo devolverías normalmente (mismo idioma que el original).
+- "en": una traducción fiel al inglés de "clean" (sin agregar ni sacar nada; nombres propios, apps y términos técnicos sin traducir).
+"""
+
+
+def rewrite(text, cfg, as_json=False):
     gemini = cfg["gemini"]
+    prompt = (APP_DIR / "prompt.md").read_text()
+    generation = {
+        "temperature": gemini.get("temperature", 0.2),
+        "thinkingConfig": {"thinkingLevel": gemini.get("thinking_level", "low")},
+    }
+    if as_json:
+        prompt += JSON_ADDENDUM
+        generation["responseMimeType"] = "application/json"
+        generation["responseSchema"] = {
+            "type": "OBJECT",
+            "properties": {"clean": {"type": "STRING"}, "en": {"type": "STRING"}},
+            "required": ["clean", "en"],
+        }
     body = {
-        "systemInstruction": {"parts": [{"text": (APP_DIR / "prompt.md").read_text()}]},
+        "systemInstruction": {"parts": [{"text": prompt}]},
         "contents": [{"role": "user", "parts": [{"text": text}]}],
-        "generationConfig": {
-            "temperature": gemini.get("temperature", 0.2),
-            "thinkingConfig": {"thinkingLevel": gemini.get("thinking_level", "low")},
-        },
+        "generationConfig": generation,
     }
     req = urllib.request.Request(
         API_URL.format(model=gemini["model"]),
@@ -80,17 +101,25 @@ def log(entry, cfg):
 
 
 def main():
+    as_json = "--json" in sys.argv[1:]
     original = sys.stdin.read().strip()
     if not original:
+        if as_json:
+            sys.stdout.write(json.dumps({"clean": "", "en": None}))
         return
 
-    output, status = original, "ok"
+    output, english, status = original, None, "ok"
     started = time.monotonic()
     try:
         cfg = load_config()
-        result = rewrite(original, cfg)
+        result = rewrite(original, cfg, as_json)
+        if as_json:
+            data = json.loads(result)
+            result, candidate = str(data.get("clean", "")).strip(), data.get("en")
         if looks_sane(original, result, cfg):
             output = result
+            if as_json and isinstance(candidate, str) and candidate.strip():
+                english = candidate.strip()
         else:
             status = "rejected"
     except Exception as e:  # noqa: BLE001 - cualquier falla cae al original
@@ -101,7 +130,11 @@ def main():
             pass
         status = f"error: {type(e).__name__}: {e}"
 
-    sys.stdout.write(output)
+    if as_json:
+        # Ante cualquier falla: el original y sin inglés (el que llama decide).
+        sys.stdout.write(json.dumps({"clean": output, "en": english}, ensure_ascii=False))
+    else:
+        sys.stdout.write(output)
     log(
         {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -109,6 +142,7 @@ def main():
             "status": status,
             "in": original,
             "out": output,
+            **({"en": english} if as_json else {}),
         },
         cfg,
     )

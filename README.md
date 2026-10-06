@@ -109,3 +109,14 @@ Borrá el bloque `[profiles.antirant]` de `~/.config/voxtype/config.toml`, la l�
 ## Licencia
 
 [MIT](LICENSE)
+
+## Modo JSON (para otras herramientas)
+
+`antirant --json` devuelve, en la misma llamada a Gemini, el texto limpio y una traducción al inglés:
+
+```bash
+echo "abrí espotifai y, esperá que estoy grabando, y mandalo al workspace tres" | ./antirant --json
+# {"clean": "Abrí Spotify y mandalo al workspace tres.", "en": "Open Spotify and send it to workspace three."}
+```
+
+Ante cualquier falla devuelve `{"clean": <original>, "en": null}`. Lo usa [tetsuHelper](https://github.com/4rc4n70s/tetsuHelper) para pasarle el pedido en inglés a modelos que rinden mejor en ese idioma. Sin `--json` funciona exactamente igual que siempre.
