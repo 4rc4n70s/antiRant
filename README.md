@@ -120,3 +120,7 @@ echo "abrí espotifai y, esperá que estoy grabando, y mandalo al workspace tres
 ```
 
 Ante cualquier falla devuelve `{"clean": <original>, "en": null}`. Lo usa [tetsuHelper](https://github.com/4rc4n70s/tetsuHelper) para pasarle el pedido en inglés a modelos que rinden mejor en ese idioma. Sin `--json` funciona exactamente igual que siempre.
+
+## Vocabulario propio (`--context`)
+
+`antirant --context ~/.config/tetsuhelper/tetsu.md` (o la variable `ANTIRANT_CONTEXT`) suma al prompt **sólo** la sección `## Vocabulario` de ese Markdown: nombres y palabras tuyas, para que las escriba bien. Se ignoran los comentarios `<!-- … -->` y el resto del archivo no sale de tu máquina. Sin la opción, funciona igual que siempre.

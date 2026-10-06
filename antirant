@@ -47,15 +47,73 @@ En lugar de sólo el texto, devolvé un objeto JSON con dos campos:
 """
 
 
-def rewrite(text, cfg, as_json=False):
+# Contexto opcional (--context FILE o ANTIRANT_CONTEXT): un Markdown con una
+# sección "## Vocabulario" (el tetsu.md de tetsuHelper). Sólo se lee esa
+# sección; el resto del archivo no sale nunca de la máquina.
+VOCAB_SECTION = "vocabulario"
+VOCAB_MAX_CHARS = 1500
+VOCAB_ADDENDUM = """
+
+## Vocabulario del usuario
+Palabras y nombres que esta persona usa. Si la transcripción tiene algo que se parece a alguna (suena parecido, está mal escrito), escribila exactamente así. No agregues ninguna que no aparezca en lo dicho.
+{words}
+"""
+
+
+def read_vocabulary(path):
+    """Líneas de la sección Vocabulario de `path` ("" si no hay archivo o sección)."""
+    try:
+        text = Path(path).expanduser().read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return ""
+    lines, inside, in_comment = [], False, False
+    for line in text.splitlines():
+        s = line.strip()
+        # HTML comments (también de varias líneas) no son vocabulario.
+        if in_comment:
+            in_comment = "-->" not in s
+            continue
+        if s.startswith("<!--"):
+            in_comment = "-->" not in s
+            continue
+        if s.startswith("#"):
+            if s.startswith("## "):
+                inside = s[3:].strip().lower().replace("á", "a") == VOCAB_SECTION
+            continue
+        if inside and s:
+            lines.append("- " + (s.lstrip("-*• ").strip() if s[0] in "-*•" else s))
+    return "\n".join(lines)[:VOCAB_MAX_CHARS]
+
+
+def build_prompt(base, as_json=False, vocabulary=""):
+    """System prompt: base + (modo JSON) + (vocabulario). Sin flags queda idéntico al de siempre."""
+    prompt = base
+    if as_json:
+        prompt += JSON_ADDENDUM
+    if vocabulary.strip():
+        prompt += VOCAB_ADDENDUM.format(words=vocabulary.strip())
+    return prompt
+
+
+def context_path(argv):
+    """Valor de --context FILE / --context=FILE, o ANTIRANT_CONTEXT, o None."""
+    for i, a in enumerate(argv):
+        if a == "--context" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--context="):
+            return a.split("=", 1)[1]
+    return os.environ.get("ANTIRANT_CONTEXT", "").strip() or None
+
+
+def rewrite(text, cfg, as_json=False, context=None):
     gemini = cfg["gemini"]
-    prompt = (APP_DIR / "prompt.md").read_text()
+    prompt = build_prompt((APP_DIR / "prompt.md").read_text(), as_json,
+                          read_vocabulary(context) if context else "")
     generation = {
         "temperature": gemini.get("temperature", 0.2),
         "thinkingConfig": {"thinkingLevel": gemini.get("thinking_level", "low")},
     }
     if as_json:
-        prompt += JSON_ADDENDUM
         generation["responseMimeType"] = "application/json"
         generation["responseSchema"] = {
             "type": "OBJECT",
@@ -112,7 +170,7 @@ def main():
     started = time.monotonic()
     try:
         cfg = load_config()
-        result = rewrite(original, cfg, as_json)
+        result = rewrite(original, cfg, as_json, context_path(sys.argv[1:]))
         if as_json:
             data = json.loads(result)
             result, candidate = str(data.get("clean", "")).strip(), data.get("en")
